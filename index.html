@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Encoding" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+    <title>Sportime Chatbot QA Master Dashboard</title>
+    <!-- Stlite Loader CDN -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@stlite/mountable@0.50.0/build/stlite.css" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script src="https://cdn.jsdelivr.net/npm/@stlite/mountable@0.50.0/build/stlite.js"></script>
+    <script>
+      stlite.mount(
+        {
+          requirements: ["streamlit", "pandas", "plotly", "openpyxl"],
+          entrypoint: "app.py",
+          files: {
+            "app.py": `
+import streamlit as st
+import pandas as pd
+import plotly.express as px
+
+st.set_page_config(page_title="Sportime QA Dashboard", layout="wide")
+st.title("🏀 Sportime Chatbot QA Analytics Dashboard")
+
+st.info("Upload your Excel file to inspect analytics live in browser:")
+uploaded_file = st.file_uploader("Upload Excel Document", type=["xlsx"])
+
+if uploaded_file:
+    xls = pd.ExcelFile(uploaded_file)
+    sheet_names = xls.sheet_names
+    st.success(f"Workbook Loaded Successfully! Sheets found: {sheet_names}")
+    
+    selected_sheet = st.selectbox("Select Sheet to Inspect", sheet_names)
+    df = pd.read_excel(uploaded_file, sheet_name=selected_sheet)
+    
+    st.dataframe(df, use_container_width=True)
+`
+          }
+        },
+        document.getElementById("root")
+      );
+    </script>
+  </body>
+</html>
