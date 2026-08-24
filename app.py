@@ -105,11 +105,11 @@ if workbook:
 
     # Dashboard Tabs
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "📈 Executive KPIs & Reliability",
-        "🎯 Topic-Wise Accuracy Breakdown",
-        "❌ Failure Reason Deep Dive",
-        "📑 Sequential Test Case Inspector",
-        "📁 Raw Workbook Sheets",
+        " Executive KPIs & Reliability",
+        "Topic-Wise Accuracy Breakdown",
+        " Failure Reason Deep Dive",
+        "Sequential Test Case Inspector",
+        " Raw Workbook Sheets",
     ])
 
     # TAB 1: EXECUTIVE KPIS & RELIABILITY
