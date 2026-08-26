@@ -48,9 +48,9 @@ def truncate_text(text, max_len=45):
     return text
 
 def clean_raw_sheet(df):
-    """Clean unformatted sheets by dropping empty rows and promoting true headers."""
+    """Clean unformatted sheets by dropping empty rows and promoting true headers with unique column names."""
     temp_df = df.dropna(how="all").copy()
-    
+
     # Find row with most non-null entries to set as header if current headers contain "Unnamed" or numbers
     if any(str(col).startswith("Unnamed") or str(col).isdigit() for col in temp_df.columns):
         header_idx = None
@@ -59,17 +59,32 @@ def clean_raw_sheet(df):
             if len(row_vals) >= 3 and not any("Sportime" in v for v in row_vals):
                 header_idx = i
                 break
-        
+
         if header_idx is not None:
-            new_headers = temp_df.iloc[header_idx].astype(str).str.strip()
+            new_headers = temp_df.iloc[header_idx].astype(str).str.strip().tolist()
             temp_df = temp_df.iloc[header_idx + 1:].copy()
             temp_df.columns = new_headers
+
+    # Deduplicate and sanitize column names to satisfy PyArrow requirements
+    cols = []
+    col_counts = {}
+    for idx, col in enumerate(temp_df.columns):
+        col_str = str(col).strip()
+        if col_str in ["nan", "None", "", "Unnamed"]:
+            col_str = f"Unnamed_{idx}"
+        if col_str in col_counts:
+            col_counts[col_str] += 1
+            col_str = f"{col_str}_{col_counts[col_str]}"
+        else:
+            col_counts[col_str] = 0
+        cols.append(col_str)
+    temp_df.columns = cols
 
     # Drop fully empty rows/cols
     temp_df = temp_df.dropna(how="all").loc[:, temp_df.notna().any()]
     temp_df = temp_df.fillna("-")
-    
-    # Format decimal percentage columns safely (Pandas 2.2+ Compatible)
+
+    # Format decimal percentage columns safely
     for col in temp_df.columns:
         col_str = str(col).lower()
         if any(kw in col_str for kw in ["rate", "accuracy", "pass %", "fail %", "relevance"]):
@@ -115,7 +130,7 @@ def load_all_sheets(file_bytes):
             sheets[name] = df
 
         else:
-            df = pd.read_excel(io.BytesIO(file_bytes), sheet_name=None) if False else pd.read_excel(io.BytesIO(file_bytes), sheet_name=name, header=None)
+            df = pd.read_excel(io.BytesIO(file_bytes), sheet_name=name, header=None)
             sheets[name] = df
 
     return sheets
