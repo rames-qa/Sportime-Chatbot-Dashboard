@@ -65,18 +65,19 @@ def clean_raw_sheet(df):
             temp_df = temp_df.iloc[header_idx + 1:].copy()
             temp_df.columns = new_headers
 
-    # Drop fully empty rows/cols and reset index
+    # Drop fully empty rows/cols
     temp_df = temp_df.dropna(how="all").loc[:, temp_df.notna().any()]
     temp_df = temp_df.fillna("-")
     
-    # Format decimal percentage columns
+    # Format decimal percentage columns safely (Pandas 2.2+ Compatible)
     for col in temp_df.columns:
         col_str = str(col).lower()
         if any(kw in col_str for kw in ["rate", "accuracy", "pass %", "fail %", "relevance"]):
-            temp_df[col] = pd.to_numeric(temp_df[col], errors="ignore")
-            temp_df[col] = temp_df[col].apply(
-                lambda x: f"{x * 100:.2f}%" if isinstance(x, (int, float)) and 0 <= x <= 1 else x
-            )
+            converted_series = pd.to_numeric(temp_df[col], errors="coerce")
+            if converted_series.notna().any():
+                temp_df[col] = converted_series.apply(
+                    lambda x: f"{x * 100:.2f}%" if pd.notna(x) and isinstance(x, (int, float)) and 0 <= x <= 1 else x
+                )
 
     return temp_df
 
@@ -114,7 +115,7 @@ def load_all_sheets(file_bytes):
             sheets[name] = df
 
         else:
-            df = pd.read_excel(io.BytesIO(file_bytes), sheet_name=name, header=None)
+            df = pd.read_excel(io.BytesIO(file_bytes), sheet_name=None) if False else pd.read_excel(io.BytesIO(file_bytes), sheet_name=name, header=None)
             sheets[name] = df
 
     return sheets
@@ -142,6 +143,13 @@ df_master = workbook.get("QA & Master Audit", pd.DataFrame())
 if df_master.empty:
     st.error("QA & Master Audit sheet was not loaded correctly.")
     st.stop()
+
+df_master.columns = df_master.columns.astype(str).str.strip()
+df_master = clean_text_column(df_master, "Status", "upper")
+df_master = clean_text_column(df_master, "Relevance", "title")
+df_master = clean_text_column(df_master, "Category")
+df_master = clean_text_column(df_master, "Subcategory")
+df_master = clean_text_column(df_master, "Question Type")
 
 # =========================================================
 # SIDEBAR FILTERS
@@ -178,11 +186,132 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📄 Raw Workbook Sheets",
 ])
 
-# Tab 1 & Tab 2 remain intact ...
-# (Included in full deployment build)
+# =========================================================
+# TAB 1: EXECUTIVE KPIs & RELIABILITY
+# =========================================================
+with tab1:
+    st.subheader("Key Performance Indicators")
+
+    total_eval = len(filtered_df)
+    pass_cnt = filtered_df["Status"].eq("PASS").sum() if "Status" in filtered_df.columns else 0
+    fail_cnt = filtered_df["Status"].eq("FAIL").sum() if "Status" in filtered_df.columns else 0
+    relevant_cnt = filtered_df["Relevance"].eq("Relevant").sum() if "Relevance" in filtered_df.columns else 0
+
+    pass_rate = (pass_cnt / total_eval * 100) if total_eval > 0 else 0
+    fail_rate = (fail_cnt / total_eval * 100) if total_eval > 0 else 0
+    relevance_rate = (relevant_cnt / total_eval * 100) if total_eval > 0 else 0
+    reliability = calculate_reliability(pass_rate)
+
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1.metric("Total Test Cases", total_eval)
+    c2.metric("Passed", pass_cnt)
+    c3.metric("Failed", fail_cnt)
+    c4.metric("Pass Rate", f"{pass_rate:.2f}%")
+    c5.metric("Fail Rate", f"{fail_rate:.2f}%")
+    c6.metric("Relevance Rate", f"{relevance_rate:.2f}%")
+
+    st.markdown("---")
+    st.subheader("System Reliability")
+
+    if pass_rate >= 90:
+        st.success(f"System Reliability: {reliability}")
+    elif pass_rate >= 50:
+        st.warning(f"System Reliability: {reliability}")
+    else:
+        st.error(f"System Reliability: {reliability}")
+
+    g1, g2 = st.columns(2)
+
+    with g1:
+        st.subheader("Overall Status Distribution")
+        if "Status" in filtered_df.columns and not filtered_df.empty:
+            status_counts = filtered_df["Status"].value_counts().reset_index()
+            status_counts.columns = ["Status", "Count"]
+
+            fig_status = px.pie(
+                status_counts,
+                names="Status",
+                values="Count",
+                color="Status",
+                color_discrete_map={"PASS": "#2ea44f", "FAIL": "#cb2431"},
+                hole=0.45,
+            )
+            st.plotly_chart(fig_status, use_container_width=True)
+
+    with g2:
+        st.subheader("Intent Relevance Distribution")
+        if "Relevance" in filtered_df.columns and not filtered_df.empty:
+            relevance_counts = filtered_df["Relevance"].value_counts().reset_index()
+            relevance_counts.columns = ["Relevance", "Count"]
+
+            fig_rel = px.pie(
+                relevance_counts,
+                names="Relevance",
+                values="Count",
+                color="Relevance",
+                color_discrete_map={"Relevant": "#1f77b4", "Not Relevant": "#ff7f0e"},
+                hole=0.45,
+            )
+            st.plotly_chart(fig_rel, use_container_width=True)
 
 # =========================================================
-# TAB 3: ENHANCED FAILURE REASON DEEP DIVE
+# TAB 2: TOPIC-WISE ACCURACY BREAKDOWN
+# =========================================================
+with tab2:
+    st.subheader("Pass vs Fail Performance by Category")
+
+    if "Category" in filtered_df.columns and "Status" in filtered_df.columns and not filtered_df.empty:
+        cat_perf = filtered_df.groupby(["Category", "Status"]).size().reset_index(name="Count")
+
+        fig_cat = px.bar(
+            cat_perf,
+            x="Category",
+            y="Count",
+            color="Status",
+            barmode="group",
+            color_discrete_map={"PASS": "#2ea44f", "FAIL": "#cb2431"},
+            title="Pass vs Fail Count Across Categories"
+        )
+        st.plotly_chart(fig_cat, use_container_width=True)
+
+        st.subheader("Category Performance Matrix")
+
+        category_summary = (
+            filtered_df.groupby("Category")
+            .agg(
+                Total=("Status", "size"),
+                Passed=("Status", lambda x: (x == "PASS").sum()),
+                Failed=("Status", lambda x: (x == "FAIL").sum()),
+            )
+            .reset_index()
+        )
+
+        category_summary["Pass Rate Num"] = (category_summary["Passed"] / category_summary["Total"] * 100).round(2)
+        category_summary["Pass Rate (%)"] = category_summary["Pass Rate Num"].map("{:.2f}%".format)
+        category_summary["Fail Rate (%)"] = (category_summary["Failed"] / category_summary["Total"] * 100).map("{:.2f}%".format)
+        category_summary["Reliability"] = category_summary["Pass Rate Num"].apply(calculate_reliability)
+
+        display_cat_summary = category_summary.drop(columns=["Pass Rate Num"])
+        st.dataframe(display_cat_summary, use_container_width=True, hide_index=True)
+
+    st.subheader("Question Type Reliability Impact")
+
+    if "Question Type" in filtered_df.columns and "Status" in filtered_df.columns and not filtered_df.empty:
+        qt_perf = filtered_df.groupby(["Question Type", "Status"]).size().reset_index(name="Count")
+
+        fig_qt = px.bar(
+            qt_perf,
+            x="Question Type",
+            y="Count",
+            color="Status",
+            barmode="stack",
+            color_discrete_map={"PASS": "#2ea44f", "FAIL": "#cb2431"},
+            title="Status Breakdown by Question Type"
+        )
+        st.plotly_chart(fig_qt, use_container_width=True)
+
+# =========================================================
+# TAB 3: FAILURE REASON DEEP DIVE
 # =========================================================
 with tab3:
     st.subheader("🎯 Failure Root Cause Analysis")
@@ -192,7 +321,6 @@ with tab3:
     if fail_df.empty:
         st.success("🎉 No failed test cases found under current filter selection.")
     else:
-        # Failure Summary Metrics
         top_reason = fail_df["Failure Reason"].mode()[0] if "Failure Reason" in fail_df.columns and not fail_df["Failure Reason"].empty else "N/A"
         top_cat = fail_df["Category"].mode()[0] if "Category" in fail_df.columns and not fail_df["Category"].empty else "N/A"
         
@@ -214,7 +342,6 @@ with tab3:
             reason_counts.columns = ["Full Failure Reason", "Count"]
             reason_counts["Short Label"] = reason_counts["Full Failure Reason"].apply(lambda x: truncate_text(x, 42))
 
-            # Dynamic height based on number of failure reasons
             chart_height = max(400, len(reason_counts) * 35)
 
             fig_fail = px.bar(
@@ -247,7 +374,38 @@ with tab3:
         st.dataframe(fail_df[avail_cols], use_container_width=True, height=450, hide_index=True)
 
 # =========================================================
-# TAB 5: SOPHISTICATED RAW WORKBOOK SHEETS
+# TAB 4: SEQUENTIAL TEST CASE INSPECTOR
+# =========================================================
+with tab4:
+    st.subheader("Sequential Test Case Inspector")
+
+    display_cols = [
+        "Test Case ID",
+        "Category",
+        "Subcategory",
+        "Question Type",
+        "Status",
+        "Relevance",
+        "User Question",
+        "Chatbot Answer",
+        "Expected Answer",
+        "Failure Reason",
+    ]
+
+    available_cols = [col for col in display_cols if col in filtered_df.columns]
+
+    st.dataframe(filtered_df[available_cols], use_container_width=True, height=600, hide_index=True)
+
+    csv_data = filtered_df[available_cols].to_csv(index=False).encode("utf-8")
+    st.download_button(
+        label="📥 Export Current View to CSV",
+        data=csv_data,
+        file_name="Sportime_Filtered_QA_Export.csv",
+        mime="text/csv",
+    )
+
+# =========================================================
+# TAB 5: RAW WORKBOOK SHEETS
 # =========================================================
 with tab5:
     st.subheader("📄 Raw Workbook Sheet Explorer")
@@ -264,7 +422,6 @@ with tab5:
 
     st.markdown("---")
     
-    # Styled Data Table Display
     st.dataframe(
         cleaned_df,
         use_container_width=True,
