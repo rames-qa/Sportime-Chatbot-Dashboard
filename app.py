@@ -2,7 +2,6 @@ import io
 import pandas as pd
 import plotly.express as px
 import streamlit as st
-
 # =========================================================
 # PAGE CONFIGURATION
 # =========================================================
@@ -30,7 +29,7 @@ def clean_text_column(df, column, case="normal"):
     return df
 
 def calculate_reliability(pass_rate):
-    """Return reliability level based on pass rate."""
+    """Return reliability level based on pass rate numeric value."""
     if pass_rate >= 90:
         return "High Reliability"
     elif pass_rate >= 75:
@@ -50,8 +49,7 @@ def load_all_sheets(file_bytes):
 
     for name in xls.sheet_names:
         # -------------------------------------------------
-        # QA & MASTER AUDIT
-        # Header is on Excel row 4 (0-indexed header=3)
+        # QA & MASTER AUDIT (Header row 4 -> index 3)
         # -------------------------------------------------
         if name == "QA & Master Audit":
             df = pd.read_excel(
@@ -62,17 +60,14 @@ def load_all_sheets(file_bytes):
             df = df.dropna(how="all")
             df.columns = df.columns.astype(str).str.strip()
 
-            # Map Excel column name to dashboard standard name
             if "Pass and Failure Reason" in df.columns:
                 df = df.rename(
                     columns={"Pass and Failure Reason": "Failure Reason"}
                 )
 
-            # Filter valid test case rows
             if "Test Case ID" in df.columns:
                 df = df[df["Test Case ID"].notna()].copy()
 
-            # Standardize key text columns
             df = clean_text_column(df, "Status", "upper")
             df = clean_text_column(df, "Relevance", "title")
             df = clean_text_column(df, "Category")
@@ -82,8 +77,7 @@ def load_all_sheets(file_bytes):
             sheets[name] = df
 
         # -------------------------------------------------
-        # TOPIC WISE MASTER AUDIT
-        # Header is on Excel row 4 (0-indexed header=3)
+        # TOPIC WISE MASTER AUDIT (Header row 4 -> index 3)
         # -------------------------------------------------
         elif name == "Topic Wise Master Audit":
             df = pd.read_excel(
@@ -95,9 +89,6 @@ def load_all_sheets(file_bytes):
             df.columns = df.columns.astype(str).str.strip()
             sheets[name] = df
 
-        # -------------------------------------------------
-        # EXECUTIVE DASHBOARD AND OTHER SHEETS
-        # -------------------------------------------------
         else:
             df = pd.read_excel(
                 io.BytesIO(file_bytes),
@@ -152,7 +143,6 @@ if df_master.empty:
     st.error("QA & Master Audit sheet was not loaded correctly.")
     st.stop()
 
-# Re-verify clean formatting
 df_master.columns = df_master.columns.astype(str).str.strip()
 df_master = clean_text_column(df_master, "Status", "upper")
 df_master = clean_text_column(df_master, "Relevance", "title")
@@ -165,7 +155,6 @@ df_master = clean_text_column(df_master, "Question Type")
 # =========================================================
 st.sidebar.header("🔍 Global Data Filters")
 
-# Category Filter
 if "Category" in df_master.columns:
     cat_values = df_master["Category"].replace("", pd.NA).dropna().unique().tolist()
     cat_options = ["All"] + sorted(cat_values)
@@ -173,7 +162,6 @@ else:
     cat_options = ["All"]
 selected_cat = st.sidebar.selectbox("Filter Category / Topic", cat_options)
 
-# Question Type Filter
 if "Question Type" in df_master.columns:
     qtype_values = df_master["Question Type"].replace("", pd.NA).dropna().unique().tolist()
     qtype_options = ["All"] + sorted(qtype_values)
@@ -181,7 +169,6 @@ else:
     qtype_options = ["All"]
 selected_qtype = st.sidebar.selectbox("Filter Question Type", qtype_options)
 
-# Status Filter
 if "Status" in df_master.columns:
     status_values = df_master["Status"].replace("", pd.NA).dropna().unique().tolist()
     status_options = ["All"] + sorted(status_values)
@@ -189,7 +176,6 @@ else:
     status_options = ["All"]
 selected_status = st.sidebar.selectbox("Filter Status", status_options)
 
-# Relevance Filter
 if "Relevance" in df_master.columns:
     relevance_values = df_master["Relevance"].replace("", pd.NA).dropna().unique().tolist()
     relevance_options = ["All"] + sorted(relevance_values)
@@ -259,7 +245,6 @@ with tab1:
     else:
         st.error(f"System Reliability: {reliability}")
 
-    # Charts
     g1, g2 = st.columns(2)
 
     with g1:
@@ -326,11 +311,13 @@ with tab2:
             .reset_index()
         )
 
-        category_summary["Pass Rate (%)"] = (category_summary["Passed"] / category_summary["Total"] * 100).round(2)
-        category_summary["Fail Rate (%)"] = (category_summary["Failed"] / category_summary["Total"] * 100).round(2)
-        category_summary["Reliability"] = category_summary["Pass Rate (%)"].apply(calculate_reliability)
+        category_summary["Pass Rate Num"] = (category_summary["Passed"] / category_summary["Total"] * 100).round(2)
+        category_summary["Pass Rate (%)"] = category_summary["Pass Rate Num"].map("{:.2f}%".format)
+        category_summary["Fail Rate (%)"] = (category_summary["Failed"] / category_summary["Total"] * 100).map("{:.2f}%".format)
+        category_summary["Reliability"] = category_summary["Pass Rate Num"].apply(calculate_reliability)
 
-        st.dataframe(category_summary, use_container_width=True, hide_index=True)
+        display_cat_summary = category_summary.drop(columns=["Pass Rate Num"])
+        st.dataframe(display_cat_summary, use_container_width=True, hide_index=True)
 
     st.subheader("Question Type Reliability Impact")
 
@@ -422,7 +409,7 @@ with tab4:
 
     st.dataframe(filtered_df[available_cols], use_container_width=True, height=600, hide_index=True)
 
-    csv_data = filtered_df.to_csv(index=False).encode("utf-8")
+    csv_data = filtered_df[available_cols].to_csv(index=False).encode("utf-8")
     st.download_button(
         label="📥 Export Current View to CSV",
         data=csv_data,
@@ -436,7 +423,18 @@ with tab4:
 with tab5:
     st.subheader("Workbook Sheet Explorer")
     selected_sheet = st.selectbox("Select Sheet to View", list(workbook.keys()))
-    st.dataframe(workbook[selected_sheet], use_container_width=True, hide_index=True)
+
+    sheet_df = workbook[selected_sheet].copy()
+
+    # Format numeric decimal columns as explicit percentages if present
+    for col in sheet_df.columns:
+        if "rate" in str(col).lower() or "accuracy" in str(col).lower():
+            sheet_df[col] = pd.to_numeric(sheet_df[col], errors="ignore")
+            sheet_df[col] = sheet_df[col].apply(
+                lambda x: f"{x * 100:.2f}%" if isinstance(x, (int, float)) and 0 <= x <= 1 else x
+            )
+
+    st.dataframe(sheet_df, use_container_width=True, hide_index=True)
 
 # =========================================================
 # FOOTER
