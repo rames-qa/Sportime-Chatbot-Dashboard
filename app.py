@@ -138,7 +138,7 @@ def load_all_sheets(file_bytes):
 # =========================================================
 # HEADER & UPLOAD
 # =========================================================
-st.title("🏀 Sportime Chatbot QA & System Reliability Dashboard")
+st.title(" Sportime Chatbot QA & System Reliability Dashboard")
 st.markdown("Analyze chatbot evaluation data, failure root causes, and domain accuracy metrics.")
 
 uploaded_file = st.file_uploader("📁 Upload Sportime QA Excel Workbook", type=["xlsx"], key="excel_uploader")
