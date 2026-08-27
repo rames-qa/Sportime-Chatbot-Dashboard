@@ -269,7 +269,7 @@ with tab3:
     reason_col = get_col(filtered_df, "Failure Reason")
     fail_df = filtered_df[filtered_df[status_col] == "FAIL"].copy() if status_col else pd.DataFrame()
     if fail_df.empty:
-        st.success("🎉 No failed test cases found under current filter selection.")
+        st.success(" No failed test cases found under current filter selection.")
     else:
         top_reason = fail_df[reason_col].mode()[0] if reason_col and not fail_df[reason_col].empty else "N/A"
         top_cat = fail_df[cat_col].mode()[0] if cat_col and not fail_df[cat_col].empty else "N/A" 
